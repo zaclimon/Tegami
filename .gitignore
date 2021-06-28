@@ -25,4 +25,7 @@
 # Goland configuration
 .idea/
 
+# VSCode configuration
+.vscode/
+
 # End of https://www.toptal.com/developers/gitignore/api/go

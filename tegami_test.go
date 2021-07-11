@@ -39,63 +39,39 @@ func TestReceiveMessage(t *testing.T) {
 	defer srv.Shutdown(context.Background())
 	waitForServer()
 
-	t.Run("One-line body", func(t *testing.T) {
-		msg := []byte("To: test2@test.com" + lineBreak +
-			"Subject: Hello!" + lineBreak +
-			lineBreak +
-			"This is an email")
+	var tests = []struct {
+		name            string
+		messageSent     string
+		messageExpected string
+	}{
+		{
+			"One-line body",
+			"To: test2@test.com" + lineBreak + "Subject: Hello!" + lineBreak + lineBreak + "This is an email",
+			"This is an email",
+		},
+		{
+			"Two-line body",
+			"To: test2@test.com" + lineBreak + "Subject: Hello!" + lineBreak + lineBreak + "This is an email" + lineBreak + "This is another line",
+			"This is an email" + lineBreak + "This is another line",
+		},
+		{
+			"Two-line body with newline in-between",
+			"To: test2@test.com" + lineBreak + "Subject: Hello!" + lineBreak + lineBreak + "This is an email" + lineBreak + lineBreak + "This is another line",
+			"This is an email" + lineBreak + lineBreak + "This is another line",
+		},
+		{
+			"Two-line body with newline at the end",
+			"To: test2@test.com" + lineBreak + "Subject: Hello!" + lineBreak + lineBreak + "This is an email" + lineBreak + "This is another line" + lineBreak,
+			"This is an email" + lineBreak + "This is another line",
+		},
+	}
 
-		sendMessage(t, msg)
-
+	for _, test := range tests {
+		sendMessage(t, []byte(test.messageSent))
 		got := recorder.messageBody
-		want := "This is an email"
-		assertMessageContent(t, got, want)
-	})
-
-	t.Run("Two-line body", func(t *testing.T) {
-		msg := []byte("To: test2@test.com" + lineBreak +
-			"Subject: Hello!" + lineBreak +
-			lineBreak +
-			"This is an email" +
-			lineBreak +
-			"This is another line")
-
-		sendMessage(t, msg)
-
-		got := recorder.messageBody
-		want := "This is an email" + lineBreak + "This is another line"
-		assertMessageContent(t, got, want)
-	})
-
-	t.Run("Two-line body with newline between", func(t *testing.T) {
-		msg := []byte("To: test2@test.com" + lineBreak +
-			"Subject: Hello!" + lineBreak +
-			lineBreak +
-			"This is an email" +
-			lineBreak + lineBreak +
-			"This is another line")
-
-		sendMessage(t, msg)
-
-		got := recorder.messageBody
-		want := "This is an email" + lineBreak + lineBreak + "This is another line"
-		assertMessageContent(t, got, want)
-	})
-
-	t.Run("Two-line body with newline at the end", func(t *testing.T) {
-		msg := []byte("To: test2@test.com" + lineBreak +
-			"Subject: Hello!" + lineBreak +
-			lineBreak +
-			"This is an email" +
-			lineBreak +
-			"This is another line" + lineBreak)
-
-		sendMessage(t, msg)
-
-		got := recorder.messageBody
-		want := "This is an email" + lineBreak + "This is another line"
-		assertMessageContent(t, got, want)
-	})
+		want := test.messageExpected
+		assertMessageContent(t, test.name, got, want)
+	}
 }
 
 func (r *HandlerRecorder) stubHandle(remoteAddr net.Addr, from string, to []string, data []byte) error {
@@ -129,9 +105,9 @@ func sendMessage(t *testing.T, msg []byte) {
 	}
 }
 
-func assertMessageContent(t *testing.T, got, want string) {
+func assertMessageContent(t *testing.T, testName, got, want string) {
 	t.Helper()
 	if got != want {
-		t.Errorf("Message from server: '%s', Message expected: '%s'", got, want)
+		t.Errorf("Test: %s, Message from server: '%s', Message expected: '%s'", testName, got, want)
 	}
 }

@@ -16,7 +16,8 @@ var (
 	smtpAddr = fmt.Sprintf("%s:%d", smtpHost, smtpPort)
 )
 
-const lineBreak = "\r\n"
+const smtpLineBreak = "\r\n"
+const lineBreak = "\n"
 
 type HandlerRecorder struct {
 	messageBody string
@@ -39,6 +40,8 @@ func TestReceiveMessage(t *testing.T) {
 	defer srv.Shutdown(context.Background())
 	waitForServer()
 
+	toSubjectFields := "To: test2@test.com" + smtpLineBreak + "Subject: Hello!" + smtpLineBreak + smtpLineBreak
+
 	var tests = []struct {
 		name            string
 		messageSent     string
@@ -46,23 +49,33 @@ func TestReceiveMessage(t *testing.T) {
 	}{
 		{
 			"One-line body",
-			"To: test2@test.com" + lineBreak + "Subject: Hello!" + lineBreak + lineBreak + "This is an email",
+			toSubjectFields + "This is an email",
 			"This is an email",
 		},
 		{
 			"Two-line body",
-			"To: test2@test.com" + lineBreak + "Subject: Hello!" + lineBreak + lineBreak + "This is an email" + lineBreak + "This is another line",
+			toSubjectFields + "This is an email" + smtpLineBreak + "This is another line",
 			"This is an email" + lineBreak + "This is another line",
 		},
 		{
 			"Two-line body with newline in-between",
-			"To: test2@test.com" + lineBreak + "Subject: Hello!" + lineBreak + lineBreak + "This is an email" + lineBreak + lineBreak + "This is another line",
+			toSubjectFields + "This is an email" + smtpLineBreak + smtpLineBreak + "This is another line",
 			"This is an email" + lineBreak + lineBreak + "This is another line",
 		},
 		{
 			"Two-line body with newline at the end",
-			"To: test2@test.com" + lineBreak + "Subject: Hello!" + lineBreak + lineBreak + "This is an email" + lineBreak + "This is another line" + lineBreak,
+			toSubjectFields + "This is an email" + smtpLineBreak + "This is another line" + smtpLineBreak,
 			"This is an email" + lineBreak + "This is another line",
+		},
+		{
+			name:            "One-line body with bold attribute",
+			messageSent:     toSubjectFields + "This is a <b>strong</b> email",
+			messageExpected: "This is a **strong** email",
+		},
+		{
+			name:            "Three-line body with header, italics and bold",
+			messageSent:     toSubjectFields + "<h1>Hi</h1>" + smtpLineBreak + "This <i>is</i> a <b>strong</b> email" + smtpLineBreak + "From test",
+			messageExpected: "# Hi" + lineBreak + lineBreak + "This _is_ a **strong** email" + lineBreak + "From test",
 		},
 	}
 
@@ -75,7 +88,7 @@ func TestReceiveMessage(t *testing.T) {
 }
 
 func (r *HandlerRecorder) stubHandle(remoteAddr net.Addr, from string, to []string, data []byte) error {
-	body, err := ReadMessageBody(data)
+	body, err := ProcessMessage(data)
 
 	if err != nil {
 		return err
@@ -108,6 +121,6 @@ func sendMessage(t *testing.T, msg []byte) {
 func assertMessageContent(t *testing.T, testName, got, want string) {
 	t.Helper()
 	if got != want {
-		t.Errorf("Test: %s, Message from server: '%s', Message expected: '%s'", testName, got, want)
+		t.Errorf("Test: %s,\nMessage from server: '%s'\n, Message expected: '%s'", testName, got, want)
 	}
 }

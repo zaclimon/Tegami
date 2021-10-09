@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"github.com/mhale/smtpd"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/smtp"
 	"testing"
 	"time"
@@ -84,6 +87,29 @@ func TestReceiveMessage(t *testing.T) {
 		got := recorder.messageBody
 		want := test.messageExpected
 		assertMessageContent(t, test.name, got, want)
+	}
+}
+
+func TestSendTelegram(t *testing.T) {
+	msg := "This _is_ a *strong* email" + lineBreak + lineBreak + "From test"
+
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"ok": true}`)
+	}))
+	defer testServer.Close()
+
+	bot := &TelegramBot{
+		apiUrl: testServer.URL,
+		token:  "abc123",
+	}
+
+	room := &TelegramRoom{"123456"}
+
+	err := SendToTelegram(bot, room, msg)
+
+	if err != nil {
+		t.Errorf("Error while sending message to Telegram %v", err)
 	}
 }
 

@@ -14,9 +14,10 @@ import (
 )
 
 var (
-	smtpHost = "127.0.0.1"
-	smtpPort = 2525
-	smtpAddr = fmt.Sprintf("%s:%d", smtpHost, smtpPort)
+	smtpHost         = "127.0.0.1"
+	smtpPort         = 2525
+	smtpAddr         = fmt.Sprintf("%s:%d", smtpHost, smtpPort)
+	telegramBotToken = "abc123"
 )
 
 const smtpLineBreak = "\r\n"
@@ -92,25 +93,42 @@ func TestReceiveMessage(t *testing.T) {
 
 func TestSendTelegram(t *testing.T) {
 	msg := "This _is_ a *strong* email" + lineBreak + lineBreak + "From test"
-
-	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"ok": true}`)
-	}))
-	defer testServer.Close()
-
-	bot := &TelegramBot{
-		apiUrl: testServer.URL,
-		token:  "abc123",
-	}
-
 	room := &TelegramRoom{"123456"}
+	sendMessageEndpoint := fmt.Sprintf("/bot%s/sendMessage", telegramBotToken)
 
-	err := SendToTelegram(bot, room, msg)
+	t.Run("Correct message", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.Handle(sendMessageEndpoint, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"ok": true}`)
+		}))
 
-	if err != nil {
-		t.Errorf("Error while sending message to Telegram %v", err)
-	}
+		bot, server := createStubTelegramBotServer(t, mux)
+		defer server.Close()
+
+		err := SendToTelegram(bot, room, msg)
+
+		if err != nil {
+			t.Errorf("Error while sending message to Telegram: %v", err)
+		}
+	})
+
+	t.Run("Invalid information", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.Handle(sendMessageEndpoint, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"ok": false, "error_code": 402, "description": "invalid information"}`)
+		}))
+
+		bot, server := createStubTelegramBotServer(t, mux)
+		defer server.Close()
+
+		err := SendToTelegram(bot, room, msg)
+
+		if err == nil {
+			t.Errorf("No error retrieved when we should have a 402: %v", err)
+		}
+	})
 }
 
 func (r *HandlerRecorder) stubHandle(remoteAddr net.Addr, from string, to []string, data []byte) error {
@@ -149,4 +167,21 @@ func assertMessageContent(t *testing.T, testName, got, want string) {
 	if got != want {
 		t.Errorf("Test: %s,\nMessage from server: '%s'\n, Message expected: '%s'", testName, got, want)
 	}
+}
+
+func createStubTelegramBotServer(t *testing.T, mux *http.ServeMux) (*TelegramBot, *httptest.Server) {
+	t.Helper()
+	getMeEndpoint := fmt.Sprintf("/bot%s/getMe", telegramBotToken)
+	mux.Handle(getMeEndpoint, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"ok":true,"result":{"id":123456,"first_name":"a","last_name":"b","user_name":"abc","language_code":"en","is_bot":true,"can_join_groups":true,"can_read_all_group_messages":true,"supports_inline_queries":true}}`)
+	}))
+
+	testServer := httptest.NewServer(mux)
+
+	bot := &TelegramBot{
+		apiUrl: testServer.URL,
+		token:  telegramBotToken,
+	}
+
+	return bot, testServer
 }

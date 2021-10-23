@@ -2,21 +2,24 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/mhale/smtpd"
+	"github.com/urfave/cli/v2"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/smtp"
+	"os"
 	"testing"
 	"time"
 )
 
 var (
 	smtpHost         = "127.0.0.1"
-	smtpPort         = 2525
-	smtpAddr         = fmt.Sprintf("%s:%d", smtpHost, smtpPort)
+	smtpPort         = "2525"
+	smtpAddr         = fmt.Sprintf("%s:%s", smtpHost, smtpPort)
 	telegramBotToken = "abc123"
 )
 
@@ -131,6 +134,29 @@ func TestSendTelegram(t *testing.T) {
 	})
 }
 
+func TestStartApp(t *testing.T) {
+	t.Run("With valid arguments", func(t *testing.T) {
+		args := os.Args[0:1]
+		args = append(args, fmt.Sprintf("-smtp-host=%s", smtpHost))
+		args = append(args, fmt.Sprintf("-smtp-port=%s", smtpPort))
+		args = append(args, fmt.Sprintf("-telegram-token=%s", telegramBotToken))
+		args = append(args, fmt.Sprintf("-telegram-chat-id=%s", "1234"))
+
+		err := runStubApp(args)
+		if err != nil {
+			t.Errorf("Got an error while running the app: %v", err)
+		}
+	})
+
+	t.Run("With no arguments", func(t *testing.T) {
+		args := os.Args[0:1]
+		err := runStubApp(args)
+		if err == nil {
+			t.Errorf("Had no errors while expecting one: %v", err)
+		}
+	})
+}
+
 func (r *HandlerRecorder) stubHandle(remoteAddr net.Addr, from string, to []string, data []byte) error {
 	body, err := ProcessMessage(data)
 
@@ -155,7 +181,7 @@ func waitForServer() {
 
 func sendMessage(t *testing.T, msg []byte) {
 	t.Helper()
-	err := smtp.SendMail(fmt.Sprintf("%s:%d", smtpHost, smtpPort), nil, "test@test.com", []string{"test2@test.com"}, msg)
+	err := smtp.SendMail(smtpAddr, nil, "test@test.com", []string{"test2@test.com"}, msg)
 
 	if err != nil {
 		t.Fatalf("Could not send the messageBody: %v", err)
@@ -184,4 +210,26 @@ func createStubTelegramBotServer(t *testing.T, mux *http.ServeMux) (*TelegramBot
 	}
 
 	return bot, testServer
+}
+
+func runStubApp(args []string) error {
+	app := cli.NewApp()
+	app.Flags = GenerateCLIFlags()
+	app.Action = func(c *cli.Context) error {
+		if c.NumFlags() == 0 {
+			return errors.New("no flags set")
+		}
+
+		smtpConfig := &SmtpConfig{
+			address:  smtpAddr,
+			handler:  nil,
+			appName:  "TegamiTest",
+			hostname: "",
+		}
+
+		server := StartSMTPServer(smtpConfig)
+		defer server.Close()
+		return nil
+	}
+	return app.Run(args)
 }

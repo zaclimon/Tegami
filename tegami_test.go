@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"github.com/mhale/smtpd"
 	"github.com/urfave/cli/v2"
 	"io"
 	"net"
@@ -32,19 +30,10 @@ type HandlerRecorder struct {
 
 func TestReceiveMessage(t *testing.T) {
 	// Init server
-	recorder := &HandlerRecorder{}
-	srv := &smtpd.Server{
-		Addr:     smtpAddr,
-		Handler:  recorder.stubHandle,
-		Appname:  "TegamiTest",
-		Hostname: "",
-	}
+	config, recorder := generateTestSmtpConfig()
+	srv := StartSMTPServer(config)
 
-	go func() {
-		srv.ListenAndServe()
-	}()
-
-	defer srv.Shutdown(context.Background())
+	defer srv.Close()
 	waitForServer()
 
 	toSubjectFields := "To: test2@test.com" + smtpLineBreak + "Subject: Hello!" + smtpLineBreak + smtpLineBreak
@@ -220,16 +209,21 @@ func runStubApp(args []string) error {
 			return errors.New("no flags set")
 		}
 
-		smtpConfig := &SmtpConfig{
-			address:  smtpAddr,
-			handler:  nil,
-			appName:  "TegamiTest",
-			hostname: "",
-		}
+		smtpConfig, _ := generateTestSmtpConfig()
+		smtpConfig.address = fmt.Sprintf("%s:%s", smtpHost, "0")
+		StartSMTPServer(smtpConfig)
 
-		server := StartSMTPServer(smtpConfig)
-		defer server.Close()
 		return nil
 	}
 	return app.Run(args)
+}
+
+func generateTestSmtpConfig() (*SmtpConfig, *HandlerRecorder) {
+	recorder := &HandlerRecorder{}
+	return &SmtpConfig{
+		address:  smtpAddr,
+		handler:  recorder.stubHandle,
+		appName:  "TegamiTest",
+		hostname: "",
+	}, recorder
 }

@@ -146,6 +146,41 @@ func TestStartApp(t *testing.T) {
 	})
 }
 
+func TestTelegramService(t *testing.T) {
+	telegramService := &TelegramService{}
+	mux := http.NewServeMux()
+	_, srv := createStubTelegramBotServer(t, mux)
+	flags := generateTestFlags()
+
+	flags["telegram-api-url"] = srv.URL
+
+	t.Run("Init with valid arguments", func(t *testing.T) {
+		err := telegramService.Init(flags)
+
+		if err != nil {
+			t.Errorf("Could not start Telegram service: %v", err)
+		}
+	})
+
+	t.Run("Init with invalid arguments", func(t *testing.T) {
+		flags["telegram-token"] = "foo"
+		err := telegramService.Init(flags)
+
+		if err == nil {
+			t.Errorf("Could start Telegram service even though we should not: %v", err)
+		}
+	})
+
+	t.Run("Init with missing arguments", func(t *testing.T) {
+		flags = make(map[string]string)
+		err := telegramService.Init(flags)
+		if err == nil {
+			t.Errorf("Could start Telegram service even though we should not: %v", err)
+		}
+	})
+
+}
+
 func (r *HandlerRecorder) stubHandle(remoteAddr net.Addr, from string, to []string, data []byte) error {
 	body, err := ProcessMessage(data)
 
@@ -226,4 +261,13 @@ func generateTestSmtpConfig() (*SmtpConfig, *HandlerRecorder) {
 		appName:  "TegamiTest",
 		hostname: "",
 	}, recorder
+}
+
+func generateTestFlags() map[string]string {
+	flags := make(map[string]string)
+	flags["smtp-host"] = smtpHost
+	flags["smtp-port"] = smtpPort
+	flags["telegram-token"] = telegramBotToken
+	flags["telegram-chat-id"] = "1234"
+	return flags
 }

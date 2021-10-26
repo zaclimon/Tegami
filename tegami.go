@@ -24,11 +24,20 @@ type TelegramRoom struct {
 	id string
 }
 
+type TelegramService struct {
+	bot  *telebot.Bot
+	room TelegramRoom
+}
+
 type SmtpConfig struct {
 	address  string
 	handler  smtpd.Handler
 	appName  string
 	hostname string
+}
+
+type Service interface {
+	Init(flags map[string]string) error
 }
 
 func (room *TelegramRoom) Recipient() string {
@@ -149,6 +158,11 @@ func GenerateCLIFlags() []cli.Flag {
 			EnvVars: []string{"TEGAMI_SMTP_PORT"},
 		},
 		&cli.StringFlag{
+			Name:    "telegram-api-url",
+			Usage:   "The API url used for communicating with Telegram (Optional)",
+			EnvVars: []string{"TEGAMI_TELEGRAM_API_URL"},
+		},
+		&cli.StringFlag{
 			Name:    "telegram-token",
 			Usage:   "The token used for the Telegram bot",
 			EnvVars: []string{"TEGAMI_TELEGRAM_TOKEN"},
@@ -159,4 +173,35 @@ func GenerateCLIFlags() []cli.Flag {
 			EnvVars: []string{"TEGAMI_TELEGRAM_CHAT_ID"},
 		},
 	}
+}
+
+func (service *TelegramService) Init(flags map[string]string) error {
+	apiUrl := flags["telegram-api-url"]
+	token := flags["telegram-token"]
+
+	bot, err := telebot.NewBot(telebot.Settings{
+		URL:       apiUrl,
+		Token:     token,
+		Poller:    &telebot.LongPoller{Timeout: 10 * time.Second},
+		ParseMode: telebot.ModeMarkdownV2,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	service.bot = bot
+
+	return nil
+}
+
+func generateFlagsMap(c *cli.Context) map[string]string {
+	flags := make(map[string]string)
+	flagNames := c.FlagNames()
+
+	for _, name := range flagNames {
+		flags[name] = c.String(name)
+	}
+
+	return flags
 }

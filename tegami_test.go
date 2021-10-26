@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/urfave/cli/v2"
+	"gopkg.in/tucnak/telebot.v2"
 	"io"
 	"net"
 	"net/http"
@@ -19,6 +20,7 @@ var (
 	smtpPort         = "2525"
 	smtpAddr         = fmt.Sprintf("%s:%s", smtpHost, smtpPort)
 	telegramBotToken = "abc123"
+	telegramRoom     = "123456"
 )
 
 const smtpLineBreak = "\r\n"
@@ -85,7 +87,6 @@ func TestReceiveMessage(t *testing.T) {
 
 func TestSendTelegram(t *testing.T) {
 	msg := "This _is_ a *strong* email" + lineBreak + lineBreak + "From test"
-	room := &TelegramRoom{"123456"}
 	sendMessageEndpoint := fmt.Sprintf("/bot%s/sendMessage", telegramBotToken)
 
 	t.Run("Correct message", func(t *testing.T) {
@@ -95,10 +96,10 @@ func TestSendTelegram(t *testing.T) {
 			io.WriteString(w, `{"ok": true}`)
 		}))
 
-		bot, server := createStubTelegramBotServer(t, mux)
+		service, server := createStubTelegramBotServer(t, mux)
 		defer server.Close()
 
-		err := SendToTelegram(bot, room, msg)
+		err := service.Send(msg)
 
 		if err != nil {
 			t.Errorf("Error while sending message to Telegram: %v", err)
@@ -112,10 +113,10 @@ func TestSendTelegram(t *testing.T) {
 			io.WriteString(w, `{"ok": false, "error_code": 402, "description": "invalid information"}`)
 		}))
 
-		bot, server := createStubTelegramBotServer(t, mux)
+		service, server := createStubTelegramBotServer(t, mux)
 		defer server.Close()
 
-		err := SendToTelegram(bot, room, msg)
+		err := service.Send(msg)
 
 		if err == nil {
 			t.Errorf("No error retrieved when we should have a 402: %v", err)
@@ -219,7 +220,7 @@ func assertMessageContent(t *testing.T, testName, got, want string) {
 	}
 }
 
-func createStubTelegramBotServer(t *testing.T, mux *http.ServeMux) (*TelegramBot, *httptest.Server) {
+func createStubTelegramBotServer(t *testing.T, mux *http.ServeMux) (*TelegramService, *httptest.Server) {
 	t.Helper()
 	getMeEndpoint := fmt.Sprintf("/bot%s/getMe", telegramBotToken)
 	mux.Handle(getMeEndpoint, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -228,12 +229,19 @@ func createStubTelegramBotServer(t *testing.T, mux *http.ServeMux) (*TelegramBot
 
 	testServer := httptest.NewServer(mux)
 
-	bot := &TelegramBot{
-		apiUrl: testServer.URL,
-		token:  telegramBotToken,
+	bot, _ := telebot.NewBot(telebot.Settings{
+		URL:       testServer.URL,
+		Token:     telegramBotToken,
+		Poller:    &telebot.LongPoller{Timeout: 10 * time.Second},
+		ParseMode: telebot.ModeMarkdownV2,
+	})
+
+	service := &TelegramService{
+		bot:  bot,
+		room: &TelegramRoom{id: telegramRoom},
 	}
 
-	return bot, testServer
+	return service, testServer
 }
 
 func runStubApp(args []string) error {

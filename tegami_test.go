@@ -161,10 +161,18 @@ func TestTelegramService(t *testing.T) {
 		if err != nil {
 			t.Errorf("Could not start Telegram service: %v", err)
 		}
+
+		if telegramService.bot == nil {
+			t.Errorf("Telegram bot object not initialized")
+		}
+
+		if telegramService.room == nil {
+			t.Errorf("Telegram room not initialized")
+		}
 	})
 
 	t.Run("Init with invalid arguments", func(t *testing.T) {
-		flags["telegram-token"] = "foo"
+		flags[telegramTokenFlag] = "foo"
 		err := telegramService.Init(flags)
 
 		if err == nil {
@@ -172,14 +180,31 @@ func TestTelegramService(t *testing.T) {
 		}
 	})
 
-	t.Run("Init with missing arguments", func(t *testing.T) {
-		flags = make(map[string]string)
+	t.Run("Init with missing token", func(t *testing.T) {
+		flags = generateTestFlags()
+		flags[telegramTokenFlag] = ""
 		err := telegramService.Init(flags)
 		if err == nil {
 			t.Errorf("Could start Telegram service even though we should not: %v", err)
 		}
+
+		got := err.Error()
+		want := "telegram token not set"
+		assertErrorContent(t, got, want)
 	})
 
+	t.Run("Init with missing chat room id", func(t *testing.T) {
+		flags = generateTestFlags()
+		flags[telegramChatIdFlag] = ""
+		err := telegramService.Init(flags)
+		if err == nil {
+			t.Errorf("Could start Telegram service even though we should not: %v", err)
+		}
+
+		got := err.Error()
+		want := "telegram chat id not set"
+		assertErrorContent(t, got, want)
+	})
 }
 
 func (r *HandlerRecorder) stubHandle(remoteAddr net.Addr, from string, to []string, data []byte) error {
@@ -217,6 +242,13 @@ func assertMessageContent(t *testing.T, testName, got, want string) {
 	t.Helper()
 	if got != want {
 		t.Errorf("Test: %s,\nMessage from server: '%s'\n, Message expected: '%s'", testName, got, want)
+	}
+}
+
+func assertErrorContent(t *testing.T, got, want string) {
+	t.Helper()
+	if got != want {
+		t.Errorf("error different than %s: %s", want, got)
 	}
 }
 
@@ -273,9 +305,9 @@ func generateTestSmtpConfig() (*SmtpConfig, *HandlerRecorder) {
 
 func generateTestFlags() map[string]string {
 	flags := make(map[string]string)
-	flags["smtp-host"] = smtpHost
-	flags["smtp-port"] = smtpPort
-	flags["telegram-token"] = telegramBotToken
-	flags["telegram-chat-id"] = "1234"
+	flags[smtpHostFlag] = smtpHost
+	flags[smtpPortFlag] = smtpPort
+	flags[telegramTokenFlag] = telegramBotToken
+	flags[telegramChatIdFlag] = "1234"
 	return flags
 }

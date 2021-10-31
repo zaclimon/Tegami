@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/mhale/smtpd"
@@ -9,10 +10,24 @@ import (
 	"gopkg.in/tucnak/telebot.v2"
 	"io"
 	"log"
+	"net"
 	"net/mail"
 	"os"
 	"strings"
 	"time"
+)
+
+const (
+	smtpHostFlag       = "smtp-host"
+	smtpPortFlag       = "smtp-port"
+	telegramApiUrlFlag = "telegram-api-url"
+	telegramTokenFlag  = "telegram-token"
+	telegramChatIdFlag = "telegram-chat-id"
+	smtpHostEnv        = "TEGAMI_SMTP_HOST"
+	smtpPortEnv        = "TEGAMI_SMTP_PORT"
+	telegramApiUrlEnv  = "TEGAMI_TELEGRAM_API_URL"
+	telegramTokenEnv   = "TEGAMI_TELEGRAM_TOKEN"
+	telegramChatIdEnv  = "TEGAMI_TELEGRAM_CHAT_ID"
 )
 
 type TelegramRoom struct {
@@ -36,13 +51,24 @@ type Service interface {
 	Send(msg string) error
 }
 
+var services []Service
+
 func (r *TelegramRoom) Recipient() string {
 	return r.id
 }
 
 func (s *TelegramService) Init(flags map[string]string) error {
-	apiUrl := flags["telegram-api-url"]
-	token := flags["telegram-token"]
+	apiUrl := flags[telegramApiUrlFlag]
+	token := flags[telegramTokenFlag]
+	chatId := flags[telegramChatIdFlag]
+
+	if len(token) == 0 {
+		return errors.New("telegram token not set")
+	}
+
+	if len(chatId) == 0 {
+		return errors.New("telegram chat id not set")
+	}
 
 	bot, err := telebot.NewBot(telebot.Settings{
 		URL:       apiUrl,
@@ -56,6 +82,7 @@ func (s *TelegramService) Init(flags map[string]string) error {
 	}
 
 	s.bot = bot
+	s.room = &TelegramRoom{id: chatId}
 
 	return nil
 }
@@ -101,31 +128,31 @@ func StartSMTPServer(config *SmtpConfig) *smtpd.Server {
 func GenerateCLIFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
-			Name:    "smtp-host",
+			Name:    smtpHostFlag,
 			Value:   "127.0.0.1",
 			Usage:   "IP address to bind the host smtp server to",
-			EnvVars: []string{"TEGAMI_SMTP_ADDRESS"},
+			EnvVars: []string{smtpHostEnv},
 		},
 		&cli.StringFlag{
-			Name:    "smtp-port",
+			Name:    smtpPortFlag,
 			Value:   "2525",
 			Usage:   "TCP port to bind the smtp server to",
-			EnvVars: []string{"TEGAMI_SMTP_PORT"},
+			EnvVars: []string{smtpPortEnv},
 		},
 		&cli.StringFlag{
-			Name:    "telegram-api-url",
+			Name:    telegramApiUrlFlag,
 			Usage:   "The API url used for communicating with Telegram (Optional)",
-			EnvVars: []string{"TEGAMI_TELEGRAM_API_URL"},
+			EnvVars: []string{telegramApiUrlEnv},
 		},
 		&cli.StringFlag{
-			Name:    "telegram-token",
+			Name:    telegramTokenFlag,
 			Usage:   "The token used for the Telegram bot",
-			EnvVars: []string{"TEGAMI_TELEGRAM_TOKEN"},
+			EnvVars: []string{telegramTokenEnv},
 		},
 		&cli.StringFlag{
-			Name:    "telegram-chat-id",
+			Name:    telegramChatIdFlag,
 			Usage:   "The Telegram chat room id in which the email will be transferred to",
-			EnvVars: []string{"TEGAMI_TELEGRAM_CHAT_ID"},
+			EnvVars: []string{telegramChatIdEnv},
 		},
 	}
 }
@@ -144,27 +171,8 @@ func RetrieveFlags(c *cli.Context) map[string]string {
 func main() {
 	app := cli.NewApp()
 	app.Flags = GenerateCLIFlags()
-	app.Action = func(c *cli.Context) error {
-		smtpAddr := fmt.Sprintf("%s/%s", c.String("smtp-host"), c.String("smtp-port"))
-		smtpConfig := &SmtpConfig{
-			address: smtpAddr,
-			handler: nil,
-			appName: "Tegami",
-		}
+	app.Action = initApp
 
-		flags := RetrieveFlags(c)
-		services := []Service{&TelegramService{}}
-
-		for _, service := range services {
-			err := service.Init(flags)
-			if err != nil {
-				log.Fatalf("Error while initializing service: %v", err)
-			}
-		}
-
-		StartSMTPServer(smtpConfig)
-		return nil
-	}
 	err := app.Run(os.Args)
 
 	if err != nil {
@@ -197,4 +205,54 @@ func convertToMarkdown(body string) (string, error) {
 	}
 
 	return markdownBody, nil
+}
+
+func smtpHandle(remoteAddr net.Addr, from string, to []string, data []byte) error {
+	msg, err := ProcessMessage(data)
+
+	if err != nil {
+		return err
+	}
+
+	for _, service := range services {
+		if err = service.Send(msg); err != nil {
+			fmt.Printf("Could not send message: %s\n", err.Error())
+			return err
+		}
+	}
+
+	return nil
+}
+
+func initServices(flags map[string]string) error {
+	services = []Service{&TelegramService{}}
+
+	for _, service := range services {
+		err := service.Init(flags)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func initApp(c *cli.Context) error {
+	smtpAddr := fmt.Sprintf("%s:%s", c.String(smtpHostFlag), c.String(smtpPortFlag))
+	srv := &smtpd.Server{
+		Addr:    smtpAddr,
+		Handler: smtpHandle,
+		Appname: "Tegami",
+	}
+
+	if err := initServices(RetrieveFlags(c)); err != nil {
+		log.Fatalf("Error while initializing service: %v", err)
+	}
+
+	fmt.Printf("Starting SMTP Server at address %s\n", smtpAddr)
+
+	if err := srv.ListenAndServe(); err != nil {
+		return err
+	}
+
+	return nil
 }

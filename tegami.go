@@ -207,16 +207,19 @@ func smtpHandle(remoteAddr net.Addr, from string, to []string, data []byte) erro
 	return nil
 }
 
-func initServices(flags map[string]string) error {
+func initServices(flags map[string]string) int {
 	services = []Service{&TelegramService{}}
+	successCount := 0
 
 	for _, service := range services {
 		err := service.Init(flags)
 		if err != nil {
-			return err
+			fmt.Printf("Error while initializing service: %v\n", err)
+		} else {
+			successCount++
 		}
 	}
-	return nil
+	return successCount
 }
 
 func initApp(c *cli.Context) error {
@@ -227,8 +230,8 @@ func initApp(c *cli.Context) error {
 		Appname: "Tegami",
 	}
 
-	if err := initServices(RetrieveFlags(c)); err != nil {
-		log.Fatalf("Error while initializing service: %v", err)
+	if initServices(RetrieveFlags(c)) == 0 {
+		log.Fatalln("Couldn't initialize any messaging service, exiting.")
 	}
 
 	fmt.Printf("Starting SMTP Server at address %s\n", smtpAddr)

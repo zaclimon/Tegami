@@ -154,7 +154,7 @@ func TestTelegramService(t *testing.T) {
 	_, srv := createStubTelegramBotServer(t, mux)
 	flags := generateTestFlags()
 
-	flags["telegram-api-url"] = srv.URL
+	flags[telegramApiUrlFlag] = srv.URL
 
 	t.Run("Init with valid arguments", func(t *testing.T) {
 		err := telegramService.Init(flags)

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/mhale/smtpd"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/tucnak/telebot.v2"
 	"io"
@@ -33,10 +34,10 @@ type HandlerRecorder struct {
 func TestReceiveMessage(t *testing.T) {
 	// Init server
 	config, recorder := generateTestSmtpConfig()
-	srv := StartSMTPServer(config)
+	srv := startSmtpServer(config)
 
 	defer srv.Close()
-	waitForServer()
+	waitForSmtp()
 
 	toSubjectFields := "To: test2@test.com" + smtpLineBreak + "Subject: Hello!" + smtpLineBreak + smtpLineBreak
 
@@ -218,7 +219,7 @@ func (r *HandlerRecorder) stubHandle(remoteAddr net.Addr, from string, to []stri
 	return nil
 }
 
-func waitForServer() {
+func waitForSmtp() {
 	// Wait for 5 seconds...
 	for i := 0; i < 50; i++ {
 		if c, err := smtp.Dial(smtpAddr); err == nil {
@@ -286,7 +287,7 @@ func runStubApp(args []string) error {
 
 		smtpConfig, _ := generateTestSmtpConfig()
 		smtpConfig.address = fmt.Sprintf("%s:%s", smtpHost, "0")
-		StartSMTPServer(smtpConfig)
+		startSmtpServer(smtpConfig)
 
 		return nil
 	}
@@ -310,4 +311,19 @@ func generateTestFlags() map[string]string {
 	flags[telegramTokenFlag] = telegramBotToken
 	flags[telegramChatIdFlag] = "1234"
 	return flags
+}
+
+func startSmtpServer(config *SmtpConfig) *smtpd.Server {
+	srv := &smtpd.Server{
+		Addr:     config.address,
+		Handler:  config.handler,
+		Appname:  config.appName,
+		Hostname: config.hostname,
+	}
+
+	go func() {
+		srv.ListenAndServe()
+	}()
+
+	return srv
 }

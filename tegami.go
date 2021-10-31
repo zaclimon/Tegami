@@ -108,23 +108,6 @@ func ProcessMessage(data []byte) (string, error) {
 	return trimmedBody, err
 }
 
-func StartSMTPServer(config *SmtpConfig) *smtpd.Server {
-	srv := &smtpd.Server{
-		Addr:     config.address,
-		Handler:  config.handler,
-		Appname:  config.appName,
-		Hostname: config.hostname,
-	}
-
-	go func() {
-		if err := srv.ListenAndServe(); err != nil {
-			log.Fatalf("Could not start the SMTP server: %v", err)
-		}
-	}()
-
-	return srv
-}
-
 func GenerateCLIFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{

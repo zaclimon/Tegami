@@ -142,12 +142,13 @@ func GenerateCLIFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:    smtpPortFlag,
-			Value:   "25",
+			Value:   "2525",
 			Usage:   "TCP port to bind the smtp server to",
 			EnvVars: []string{smtpPortEnv},
 		},
 		&cli.StringFlag{
 			Name:    telegramApiUrlFlag,
+			Value:   "https://api.telegram.org",
 			Usage:   "The API url used for communicating with Telegram (Optional)",
 			EnvVars: []string{telegramApiUrlEnv},
 		},

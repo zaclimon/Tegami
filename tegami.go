@@ -30,15 +30,18 @@ const (
 	telegramChatIdEnv  = "TEGAMI_TELEGRAM_CHAT_ID"
 )
 
+// TelegramRoom identifies Telegram chat rooms.
 type TelegramRoom struct {
 	id string
 }
 
+// TelegramService manages Telegram related components.
 type TelegramService struct {
 	bot  *telebot.Bot
 	room *TelegramRoom
 }
 
+// SmtpConfig stores the configuration for the SMTP server.
 type SmtpConfig struct {
 	address  string
 	handler  smtpd.Handler
@@ -46,8 +49,13 @@ type SmtpConfig struct {
 	hostname string
 }
 
+// Service is an interface for handling third-party messaging services.
 type Service interface {
+	// Init ensures the service is initialized based on the flags
+	// received by the application and returns an error in case of issues.
 	Init(flags map[string]string) error
+	// Send transfers the message to the service and returns
+	// an error if there was an issue during the transmission.
 	Send(msg string) error
 }
 
@@ -95,6 +103,21 @@ func (s *TelegramService) Send(msg string) error {
 	return nil
 }
 
+func main() {
+	app := cli.NewApp()
+	app.Flags = GenerateCLIFlags()
+	app.Action = handleCli
+
+	err := app.Run(os.Args)
+
+	if err != nil {
+		log.Fatalf("Error while starting the app: %v", err)
+	}
+}
+
+// ProcessMessage retrieves the data of the message from the SMTP server
+// and processes it. Returns the message in its  Markdown form. It also
+// returns an error if the  message couldn't be processed.
 func ProcessMessage(data []byte) (string, error) {
 	body, err := readMessageBody(data)
 
@@ -108,6 +131,7 @@ func ProcessMessage(data []byte) (string, error) {
 	return trimmedBody, err
 }
 
+// GenerateCLIFlags returns an array containing all the appropriate flags for the application.
 func GenerateCLIFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
@@ -140,6 +164,7 @@ func GenerateCLIFlags() []cli.Flag {
 	}
 }
 
+// RetrieveFlags obtains all the values of the flags
 func RetrieveFlags(c *cli.Context) map[string]string {
 	flagNames := c.FlagNames()
 	flags := make(map[string]string)
@@ -151,18 +176,8 @@ func RetrieveFlags(c *cli.Context) map[string]string {
 	return flags
 }
 
-func main() {
-	app := cli.NewApp()
-	app.Flags = GenerateCLIFlags()
-	app.Action = initApp
-
-	err := app.Run(os.Args)
-
-	if err != nil {
-		log.Fatalf("Error while starting the app: %v", err)
-	}
-}
-
+// readMessageBody reads the message body from the SMTP server and returns the string of the body.
+// It also returns an error if it couldn't properly read the message.
 func readMessageBody(data []byte) (string, error) {
 	msg, err := mail.ReadMessage(bytes.NewReader(data))
 
@@ -179,6 +194,7 @@ func readMessageBody(data []byte) (string, error) {
 	return string(body), nil
 }
 
+// convertToMarkdown converts a string of text to its appropriate Markdown configuration.
 func convertToMarkdown(body string) (string, error) {
 	converter := md.NewConverter("", true, nil)
 	markdownBody, err := converter.ConvertString(body)
@@ -190,7 +206,8 @@ func convertToMarkdown(body string) (string, error) {
 	return markdownBody, nil
 }
 
-func smtpHandle(remoteAddr net.Addr, from string, to []string, data []byte) error {
+// handleSmtp is a handler for processing SMTP messages.
+func handleSmtp(remoteAddr net.Addr, from string, to []string, data []byte) error {
 	msg, err := ProcessMessage(data)
 
 	if err != nil {
@@ -207,6 +224,8 @@ func smtpHandle(remoteAddr net.Addr, from string, to []string, data []byte) erro
 	return nil
 }
 
+// initServices is responsible for initializing all messaging services. It returns the number of
+// successfully initialized services.
 func initServices(flags map[string]string) int {
 	services = []Service{&TelegramService{}}
 	successCount := 0
@@ -222,11 +241,12 @@ func initServices(flags map[string]string) int {
 	return successCount
 }
 
-func initApp(c *cli.Context) error {
+// handleCli is the action function when Tegami is started.
+func handleCli(c *cli.Context) error {
 	smtpAddr := fmt.Sprintf("%s:%s", c.String(smtpHostFlag), c.String(smtpPortFlag))
 	srv := &smtpd.Server{
 		Addr:    smtpAddr,
-		Handler: smtpHandle,
+		Handler: handleSmtp,
 		Appname: "Tegami",
 	}
 

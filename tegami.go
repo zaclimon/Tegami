@@ -142,7 +142,7 @@ func GenerateCLIFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:    smtpPortFlag,
-			Value:   "2525",
+			Value:   "25",
 			Usage:   "TCP port to bind the smtp server to",
 			EnvVars: []string{smtpPortEnv},
 		},
@@ -166,11 +166,11 @@ func GenerateCLIFlags() []cli.Flag {
 
 // RetrieveFlags obtains all the values of the flags
 func RetrieveFlags(c *cli.Context) map[string]string {
-	flagNames := c.FlagNames()
+	flagNames := generateFlagNames()
 	flags := make(map[string]string)
 
-	for _, name := range flagNames {
-		flags[name] = c.String(name)
+	for _, flagName := range flagNames {
+		flags[flagName] = c.String(flagName)
 	}
 
 	return flags
@@ -261,4 +261,15 @@ func handleCli(c *cli.Context) error {
 	}
 
 	return nil
+}
+
+func generateFlagNames() []string {
+	flags := GenerateCLIFlags()
+	flagNames := make([]string, len(flags))
+
+	for i, flag := range flags {
+		flagNames[i] = flag.Names()[0]
+	}
+
+	return flagNames
 }

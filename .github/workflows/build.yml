@@ -37,10 +37,12 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Set environment variables    
+        run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
       - name: Build and push
         uses: docker/build-push-action@v2
         with:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64,linux/arm/v7
-          tags: zaclimon/tegami:${{ github.event.release.tag_name }}
+          tags: zaclimon/tegami:latest,zaclimon/tegami:${{ env.RELEASE_VERSION }}

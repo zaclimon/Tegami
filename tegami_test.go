@@ -27,7 +27,8 @@ const smtpLineBreak = "\r\n"
 const lineBreak = "\n"
 
 type RecorderService struct {
-	messageBody string
+	messageBody       string
+	isMarkdownService bool
 }
 
 func (s *RecorderService) Init(flags map[string]string) error {
@@ -37,6 +38,10 @@ func (s *RecorderService) Init(flags map[string]string) error {
 func (s *RecorderService) Send(msg string) error {
 	s.messageBody = msg
 	return nil
+}
+
+func (s *RecorderService) IsMarkdownService() bool {
+	return s.isMarkdownService
 }
 
 func TestReceiveMessage(t *testing.T) {
@@ -217,17 +222,36 @@ func TestTelegramService(t *testing.T) {
 }
 
 func TestSmtpHandler(t *testing.T) {
-	recorderService := &RecorderService{}
-	handler := &SmtpHandler{[]Service{recorderService}}
 	toSubjectFields := "To: test2@test.com" + smtpLineBreak + "Subject: Hello!" + smtpLineBreak + smtpLineBreak
+	htmlService := &RecorderService{isMarkdownService: false}
+	markdownService := &RecorderService{isMarkdownService: true}
+	handler := &SmtpHandler{[]Service{htmlService, markdownService}}
 	msgContent := "This is a <b>Bold</b> message!"
 	msg := []byte(toSubjectFields + msgContent)
 
 	handler.Handle(nil, "", []string{}, msg)
-	got := recorderService.messageBody
-	want := "This is a **Bold** message!"
 
-	assertMessageContent(t, t.Name(), got, want)
+	t.Run("Retrieve HTML body on non-markdown service", func(t *testing.T) {
+		if htmlService.IsMarkdownService() {
+			t.Errorf("Non-Markdown service is specified as markdown")
+		}
+
+		got := htmlService.messageBody
+		want := "This is a <b>Bold</b> message!"
+
+		assertMessageContent(t, t.Name(), got, want)
+	})
+
+	t.Run("Retrieve Markdown body on markdown service", func(t *testing.T) {
+		if !markdownService.IsMarkdownService() {
+			t.Errorf("Non-Markdown service is specified as markdown")
+		}
+
+		got := markdownService.messageBody
+		want := "This is a **Bold** message!"
+
+		assertMessageContent(t, t.Name(), got, want)
+	})
 }
 
 func waitForSmtp() {
@@ -306,7 +330,7 @@ func runStubApp(args []string) error {
 }
 
 func generateTestSmtpConfig() (*SmtpConfig, *RecorderService) {
-	service := &RecorderService{}
+	service := &RecorderService{isMarkdownService: true}
 	testHandler := &SmtpHandler{[]Service{service}}
 
 	return &SmtpConfig{

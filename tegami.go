@@ -62,6 +62,7 @@ type Service interface {
 	// Send transfers the message to the service and returns
 	// an error if there was an issue during the transmission.
 	Send(msg string) error
+	IsMarkdownService() bool
 }
 
 func (r *TelegramRoom) Recipient() string {
@@ -106,6 +107,10 @@ func (s *TelegramService) Send(msg string) error {
 	return nil
 }
 
+func (s *TelegramService) IsMarkdownService() bool {
+	return false
+}
+
 func main() {
 	app := cli.NewApp()
 	app.Flags = GenerateCLIFlags()
@@ -119,19 +124,19 @@ func main() {
 }
 
 // ProcessMessage retrieves the data of the message from the SMTP server
-// and processes it. Returns the message in its  Markdown form. It also
-// returns an error if the  message couldn't be processed.
-func ProcessMessage(data []byte) (string, error) {
+// and processes it. Returns the message in its HTML and Markdown form. It also
+// returns an error if the message couldn't be processed.
+func ProcessMessage(data []byte) (string, string, error) {
 	body, err := readMessageBody(data)
 
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	markdownBody, err := convertToMarkdown(body)
-	trimmedBody := strings.TrimSpace(markdownBody)
+	trimmedBody := strings.TrimSpace(body)
+	markdownBody, err := convertToMarkdown(trimmedBody)
 
-	return trimmedBody, err
+	return trimmedBody, markdownBody, err
 }
 
 // GenerateCLIFlags returns an array containing all the appropriate flags for the application.
@@ -212,13 +217,21 @@ func convertToMarkdown(body string) (string, error) {
 
 // Handle processes SMTP messages to registered services.
 func (h *SmtpHandler) Handle(remoteAddr net.Addr, from string, to []string, data []byte) error {
-	msg, err := ProcessMessage(data)
+	htmlMsg, markdownMsg, err := ProcessMessage(data)
 
 	if err != nil {
 		return err
 	}
 
 	for _, service := range h.services {
+		var msg string
+
+		if service.IsMarkdownService() {
+			msg = markdownMsg
+		} else {
+			msg = htmlMsg
+		}
+
 		if err = service.Send(msg); err != nil {
 			fmt.Printf("Could not send message: %s\n", err.Error())
 			return err

@@ -86,7 +86,7 @@ func (s *TelegramService) Init(flags map[string]string) error {
 		URL:       apiUrl,
 		Token:     token,
 		Poller:    &telebot.LongPoller{Timeout: 10 * time.Second},
-		ParseMode: telebot.ModeMarkdownV2,
+		ParseMode: telebot.ModeHTML,
 	})
 
 	if err != nil {

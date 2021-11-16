@@ -49,6 +49,11 @@ type SmtpConfig struct {
 	hostname string
 }
 
+// SmtpHandler handles the services in which it must send messages to.
+type SmtpHandler struct {
+	services []Service
+}
+
 // Service is an interface for handling third-party messaging services.
 type Service interface {
 	// Init ensures the service is initialized based on the flags
@@ -58,8 +63,6 @@ type Service interface {
 	// an error if there was an issue during the transmission.
 	Send(msg string) error
 }
-
-var services []Service
 
 func (r *TelegramRoom) Recipient() string {
 	return r.id
@@ -207,15 +210,15 @@ func convertToMarkdown(body string) (string, error) {
 	return markdownBody, nil
 }
 
-// handleSmtp is a handler for processing SMTP messages.
-func handleSmtp(remoteAddr net.Addr, from string, to []string, data []byte) error {
+// Handle processes SMTP messages to registered services.
+func (h *SmtpHandler) Handle(remoteAddr net.Addr, from string, to []string, data []byte) error {
 	msg, err := ProcessMessage(data)
 
 	if err != nil {
 		return err
 	}
 
-	for _, service := range services {
+	for _, service := range h.services {
 		if err = service.Send(msg); err != nil {
 			fmt.Printf("Could not send message: %s\n", err.Error())
 			return err
@@ -226,9 +229,9 @@ func handleSmtp(remoteAddr net.Addr, from string, to []string, data []byte) erro
 }
 
 // initServices is responsible for initializing all messaging services. It returns the number of
-// successfully initialized services.
-func initServices(flags map[string]string) int {
-	services = []Service{&TelegramService{}}
+// successfully initialized services as well as a slice of initialized services
+func initServices(flags map[string]string) (int, []Service) {
+	services := []Service{&TelegramService{}}
 	successCount := 0
 
 	for _, service := range services {
@@ -239,20 +242,23 @@ func initServices(flags map[string]string) int {
 			successCount++
 		}
 	}
-	return successCount
+	return successCount, services
 }
 
 // handleCli is the action function when Tegami is started.
 func handleCli(c *cli.Context) error {
 	smtpAddr := fmt.Sprintf("%s:%s", c.String(smtpHostFlag), c.String(smtpPortFlag))
-	srv := &smtpd.Server{
-		Addr:    smtpAddr,
-		Handler: handleSmtp,
-		Appname: "Tegami",
+	initServicesCount, services := initServices(RetrieveFlags(c))
+
+	if initServicesCount == 0 {
+		log.Fatalln("Couldn't initialize any messaging service, exiting.")
 	}
 
-	if initServices(RetrieveFlags(c)) == 0 {
-		log.Fatalln("Couldn't initialize any messaging service, exiting.")
+	handler := &SmtpHandler{services}
+	srv := &smtpd.Server{
+		Addr:    smtpAddr,
+		Handler: handler.Handle,
+		Appname: "Tegami",
 	}
 
 	fmt.Printf("Starting SMTP Server at address %s\n", smtpAddr)

@@ -7,7 +7,6 @@ import (
 	"github.com/urfave/cli/v2"
 	"gopkg.in/tucnak/telebot.v2"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/smtp"
@@ -27,8 +26,17 @@ var (
 const smtpLineBreak = "\r\n"
 const lineBreak = "\n"
 
-type HandlerRecorder struct {
+type RecorderService struct {
 	messageBody string
+}
+
+func (s *RecorderService) Init(flags map[string]string) error {
+	return nil
+}
+
+func (s *RecorderService) Send(msg string) error {
+	s.messageBody = msg
+	return nil
 }
 
 func TestReceiveMessage(t *testing.T) {
@@ -208,15 +216,18 @@ func TestTelegramService(t *testing.T) {
 	})
 }
 
-func (r *HandlerRecorder) stubHandle(remoteAddr net.Addr, from string, to []string, data []byte) error {
-	body, err := ProcessMessage(data)
+func TestSmtpHandler(t *testing.T) {
+	recorderService := &RecorderService{}
+	handler := &SmtpHandler{[]Service{recorderService}}
+	toSubjectFields := "To: test2@test.com" + smtpLineBreak + "Subject: Hello!" + smtpLineBreak + smtpLineBreak
+	msgContent := "This is a <b>Bold</b> message!"
+	msg := []byte(toSubjectFields + msgContent)
 
-	if err != nil {
-		return err
-	}
+	handler.Handle(nil, "", []string{}, msg)
+	got := recorderService.messageBody
+	want := "This is a **Bold** message!"
 
-	r.messageBody = body
-	return nil
+	assertMessageContent(t, t.Name(), got, want)
 }
 
 func waitForSmtp() {
@@ -294,14 +305,16 @@ func runStubApp(args []string) error {
 	return app.Run(args)
 }
 
-func generateTestSmtpConfig() (*SmtpConfig, *HandlerRecorder) {
-	recorder := &HandlerRecorder{}
+func generateTestSmtpConfig() (*SmtpConfig, *RecorderService) {
+	service := &RecorderService{}
+	testHandler := &SmtpHandler{[]Service{service}}
+
 	return &SmtpConfig{
 		address:  smtpAddr,
-		handler:  recorder.stubHandle,
+		handler:  testHandler.Handle,
 		appName:  "TegamiTest",
 		hostname: "",
-	}, recorder
+	}, service
 }
 
 func generateTestFlags() map[string]string {

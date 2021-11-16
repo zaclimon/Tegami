@@ -44,61 +44,6 @@ func (s *RecorderService) IsMarkdownService() bool {
 	return s.isMarkdownService
 }
 
-func TestReceiveMessage(t *testing.T) {
-	// Init server
-	config, recorder := generateTestSmtpConfig()
-	srv := startSmtpServer(config)
-
-	defer srv.Close()
-	waitForSmtp()
-
-	toSubjectFields := "To: test2@test.com" + smtpLineBreak + "Subject: Hello!" + smtpLineBreak + smtpLineBreak
-
-	var tests = []struct {
-		name            string
-		messageSent     string
-		messageExpected string
-	}{
-		{
-			"One-line body",
-			toSubjectFields + "This is an email",
-			"This is an email",
-		},
-		{
-			"Two-line body",
-			toSubjectFields + "This is an email" + smtpLineBreak + "This is another line",
-			"This is an email" + lineBreak + "This is another line",
-		},
-		{
-			"Two-line body with newline in-between",
-			toSubjectFields + "This is an email" + smtpLineBreak + smtpLineBreak + "This is another line",
-			"This is an email" + lineBreak + lineBreak + "This is another line",
-		},
-		{
-			"Two-line body with newline at the end",
-			toSubjectFields + "This is an email" + smtpLineBreak + "This is another line" + smtpLineBreak,
-			"This is an email" + lineBreak + "This is another line",
-		},
-		{
-			name:            "One-line body with bold attribute",
-			messageSent:     toSubjectFields + "This is a <b>strong</b> email",
-			messageExpected: "This is a **strong** email",
-		},
-		{
-			name:            "Three-line body with header, italics and bold",
-			messageSent:     toSubjectFields + "<h1>Hi</h1>" + smtpLineBreak + "This <i>is</i> a <b>strong</b> email" + smtpLineBreak + "From test",
-			messageExpected: "# Hi" + lineBreak + lineBreak + "This _is_ a **strong** email" + lineBreak + "From test",
-		},
-	}
-
-	for _, test := range tests {
-		sendMessage(t, []byte(test.messageSent))
-		got := recorder.messageBody
-		want := test.messageExpected
-		assertMessageContent(t, test.name, got, want)
-	}
-}
-
 func TestSendTelegram(t *testing.T) {
 	msg := "This _is_ a *strong* email" + lineBreak + lineBreak + "From test"
 	sendMessageEndpoint := fmt.Sprintf("/bot%s/sendMessage", telegramBotToken)
@@ -254,6 +199,76 @@ func TestSmtpHandler(t *testing.T) {
 	})
 }
 
+func TestReceiveMessage(t *testing.T) {
+	// Init server
+	config, htmlRecorder, markdownRecorder := generateTestSmtpConfig()
+	srv := startSmtpServer(config)
+
+	defer srv.Close()
+	waitForSmtp()
+
+	toSubjectFields := "To: test2@test.com" + smtpLineBreak + "Subject: Hello!" + smtpLineBreak + smtpLineBreak
+
+	var tests = []struct {
+		name            string
+		messageSent     string
+		htmlMessage     string
+		markdownMessage string
+	}{
+		{
+			"One-line body",
+			toSubjectFields + "This is an email",
+			"This is an email",
+			"This is an email",
+		},
+		{
+			"Two-line body",
+			toSubjectFields + "This is an email" + smtpLineBreak + "This is another line",
+			"This is an email" + smtpLineBreak + "This is another line",
+			"This is an email" + lineBreak + "This is another line",
+		},
+		{
+			"Two-line body with newline in-between",
+			toSubjectFields + "This is an email" + smtpLineBreak + smtpLineBreak + "This is another line",
+			"This is an email" + smtpLineBreak + smtpLineBreak + "This is another line",
+			"This is an email" + lineBreak + lineBreak + "This is another line",
+		},
+		{
+			"Two-line body with newline at the end",
+			toSubjectFields + "This is an email" + smtpLineBreak + "This is another line" + smtpLineBreak,
+			"This is an email" + smtpLineBreak + "This is another line",
+			"This is an email" + lineBreak + "This is another line",
+		},
+		{
+			"One-line body with bold attribute",
+			toSubjectFields + "This is a <b>strong</b> email",
+			"This is a <b>strong</b> email",
+			"This is a **strong** email",
+		},
+		{
+			"Three-line body with header, italics and bold",
+			toSubjectFields + "<h1>Hi</h1>" + smtpLineBreak + "This <i>is</i> a <b>strong</b> email" + smtpLineBreak + "From test",
+			"<h1>Hi</h1>" + smtpLineBreak + "This <i>is</i> a <b>strong</b> email" + smtpLineBreak + "From test",
+			"# Hi" + lineBreak + lineBreak + "This _is_ a **strong** email" + lineBreak + "From test",
+		},
+	}
+
+	for _, test := range tests {
+		sendMessage(t, []byte(test.messageSent))
+		t.Run(test.name+"-HTML", func(t *testing.T) {
+			got := htmlRecorder.messageBody
+			want := test.htmlMessage
+			assertMessageContent(t, test.name, got, want)
+		})
+
+		t.Run(test.name+"-Markdown", func(t *testing.T) {
+			got := markdownRecorder.messageBody
+			want := test.markdownMessage
+			assertMessageContent(t, test.name, got, want)
+		})
+	}
+}
+
 func waitForSmtp() {
 	// Wait for 5 seconds...
 	for i := 0; i < 50; i++ {
@@ -320,7 +335,7 @@ func runStubApp(args []string) error {
 			return errors.New("no flags set")
 		}
 
-		smtpConfig, _ := generateTestSmtpConfig()
+		smtpConfig, _, _ := generateTestSmtpConfig()
 		smtpConfig.address = fmt.Sprintf("%s:%s", smtpHost, "0")
 		startSmtpServer(smtpConfig)
 
@@ -329,16 +344,17 @@ func runStubApp(args []string) error {
 	return app.Run(args)
 }
 
-func generateTestSmtpConfig() (*SmtpConfig, *RecorderService) {
-	service := &RecorderService{isMarkdownService: true}
-	testHandler := &SmtpHandler{[]Service{service}}
+func generateTestSmtpConfig() (*SmtpConfig, *RecorderService, *RecorderService) {
+	htmlService := &RecorderService{isMarkdownService: false}
+	markdownService := &RecorderService{isMarkdownService: true}
+	testHandler := &SmtpHandler{[]Service{htmlService, markdownService}}
 
 	return &SmtpConfig{
 		address:  smtpAddr,
 		handler:  testHandler.Handle,
 		appName:  "TegamiTest",
 		hostname: "",
-	}, service
+	}, htmlService, markdownService
 }
 
 func generateTestFlags() map[string]string {

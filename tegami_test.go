@@ -251,6 +251,12 @@ func TestReceiveMessage(t *testing.T) {
 			"<h1>Hi</h1>" + smtpLineBreak + "This <i>is</i> a <b>strong</b> email" + smtpLineBreak + "From test",
 			"# Hi" + lineBreak + lineBreak + "This _is_ a **strong** email" + lineBreak + "From test",
 		},
+		{
+			"Three-line body using <br> tags",
+			toSubjectFields + "This is an email<br>This is another line<BR>This is a third line",
+			"This is an email" + lineBreak + "This is another line" + lineBreak + "This is a third line",
+			"This is an email" + lineBreak + "This is another line" + lineBreak + "This is a third line",
+		},
 	}
 
 	for _, test := range tests {

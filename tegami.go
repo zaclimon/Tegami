@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/mail"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -132,6 +133,10 @@ func ProcessMessage(data []byte) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
+
+	// Telegram doesn't accept <br> HTML tags and html-to-markdown adds two newlines instead of one.
+	breakRegex := regexp.MustCompile(`(?i)<br>`)
+	body = breakRegex.ReplaceAllString(body, "\n")
 
 	trimmedBody := strings.TrimSpace(body)
 	markdownBody, err := convertToMarkdown(trimmedBody)

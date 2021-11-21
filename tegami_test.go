@@ -252,10 +252,10 @@ func TestReceiveMessage(t *testing.T) {
 			"# Hi" + lineBreak + lineBreak + "This _is_ a **strong** email" + lineBreak + "From test",
 		},
 		{
-			"Three-line body using <br> tags",
-			toSubjectFields + "This is an email<br>This is another line<BR>This is a third line",
-			"This is an email" + lineBreak + "This is another line" + lineBreak + "This is a third line",
-			"This is an email" + lineBreak + "This is another line" + lineBreak + "This is a third line",
+			"Five-line body using break (br) HTML tags",
+			toSubjectFields + "This is an email<br>This is another line<BR>This is a third line<br />This is a fourth line<BR />This is a fifth line",
+			"This is an email" + lineBreak + "This is another line" + lineBreak + "This is a third line" + lineBreak + "This is a fourth line" + lineBreak + "This is a fifth line",
+			"This is an email" + lineBreak + "This is another line" + lineBreak + "This is a third line" + lineBreak + "This is a fourth line" + lineBreak + "This is a fifth line",
 		},
 	}
 

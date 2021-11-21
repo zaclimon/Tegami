@@ -135,7 +135,7 @@ func ProcessMessage(data []byte) (string, string, error) {
 	}
 
 	// Telegram doesn't accept <br> HTML tags and html-to-markdown adds two newlines instead of one.
-	breakRegex := regexp.MustCompile(`(?i)<br>`)
+	breakRegex := regexp.MustCompile(`(?i)<br>|<br />`)
 	body = breakRegex.ReplaceAllString(body, "\n")
 
 	trimmedBody := strings.TrimSpace(body)

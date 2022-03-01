@@ -6,7 +6,7 @@ ARG TARGETOS
 ARG TARGETARCH
 
 WORKDIR /app
-COPY go.mod go.sum tegami.go ./
+COPY go.mod go.sum smtp.go tegami.go ./
 RUN go mod download
 RUN env GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o tegami
 

@@ -1,9 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
-	"github.com/mhale/smtpd"
+	gosmtp "github.com/emersion/go-smtp"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/tucnak/telebot.v2"
 	"io"
@@ -31,7 +32,7 @@ type RecorderService struct {
 	isMarkdownService bool
 }
 
-func (s *RecorderService) Init(flags map[string]string) error {
+func (s *RecorderService) Init(_ map[string]string) error {
 	return nil
 }
 
@@ -170,11 +171,15 @@ func TestSmtpHandler(t *testing.T) {
 	toSubjectFields := "To: test2@test.com" + smtpLineBreak + "Subject: Hello!" + smtpLineBreak + smtpLineBreak
 	htmlService := &RecorderService{isMarkdownService: false}
 	markdownService := &RecorderService{isMarkdownService: true}
-	handler := &SmtpHandler{[]Service{htmlService, markdownService}}
+	session := Session{[]Service{htmlService, markdownService}}
 	msgContent := "This is a <b>Bold</b> message!"
 	msg := []byte(toSubjectFields + msgContent)
 
-	handler.Handle(nil, "", []string{}, msg)
+	err := session.Data(bytes.NewReader(msg))
+
+	if err != nil {
+		t.Errorf("Something went wrong when reading the message %v", err)
+	}
 
 	t.Run("Retrieve HTML body on non-markdown service", func(t *testing.T) {
 		if htmlService.IsMarkdownService() {
@@ -202,7 +207,7 @@ func TestSmtpHandler(t *testing.T) {
 func TestReceiveMessage(t *testing.T) {
 	// Init server
 	config, htmlRecorder, markdownRecorder := generateTestSmtpConfig()
-	srv := startSmtpServer(config)
+	srv := startSmtpServer(config, []Service{htmlRecorder, markdownRecorder})
 
 	defer srv.Close()
 	waitForSmtp()
@@ -342,8 +347,8 @@ func runStubApp(args []string) error {
 		}
 
 		smtpConfig, _, _ := generateTestSmtpConfig()
-		smtpConfig.address = fmt.Sprintf("%s:%s", smtpHost, "0")
-		startSmtpServer(smtpConfig)
+		smtpConfig.port = "0"
+		startSmtpServer(smtpConfig, []Service{})
 
 		return nil
 	}
@@ -353,13 +358,10 @@ func runStubApp(args []string) error {
 func generateTestSmtpConfig() (*SmtpConfig, *RecorderService, *RecorderService) {
 	htmlService := &RecorderService{isMarkdownService: false}
 	markdownService := &RecorderService{isMarkdownService: true}
-	testHandler := &SmtpHandler{[]Service{htmlService, markdownService}}
 
 	return &SmtpConfig{
-		address:  smtpAddr,
-		handler:  testHandler.Handle,
-		appName:  "TegamiTest",
-		hostname: "",
+		host: smtpHost,
+		port: smtpPort,
 	}, htmlService, markdownService
 }
 
@@ -372,13 +374,8 @@ func generateTestFlags() map[string]string {
 	return flags
 }
 
-func startSmtpServer(config *SmtpConfig) *smtpd.Server {
-	srv := &smtpd.Server{
-		Addr:     config.address,
-		Handler:  config.handler,
-		Appname:  config.appName,
-		Hostname: config.hostname,
-	}
+func startSmtpServer(config *SmtpConfig, services []Service) *gosmtp.Server {
+	srv := CreateSmtpServer(config, services)
 
 	go func() {
 		srv.ListenAndServe()

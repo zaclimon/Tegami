@@ -1,20 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	md "github.com/JohannesKaufmann/html-to-markdown"
-	"github.com/mhale/smtpd"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/tucnak/telebot.v2"
-	"io"
 	"log"
-	"net"
-	"net/mail"
 	"os"
-	"regexp"
-	"strings"
 	"time"
 )
 
@@ -44,15 +36,8 @@ type TelegramService struct {
 
 // SmtpConfig stores the configuration for the SMTP server.
 type SmtpConfig struct {
-	address  string
-	handler  smtpd.Handler
-	appName  string
-	hostname string
-}
-
-// SmtpHandler handles the services in which it must send messages to.
-type SmtpHandler struct {
-	services []Service
+	host string
+	port string
 }
 
 // Service is an interface for handling third-party messaging services.
@@ -124,26 +109,6 @@ func main() {
 	}
 }
 
-// ProcessMessage retrieves the data of the message from the SMTP server
-// and processes it. Returns the message in its HTML and Markdown form. It also
-// returns an error if the message couldn't be processed.
-func ProcessMessage(data []byte) (string, string, error) {
-	body, err := readMessageBody(data)
-
-	if err != nil {
-		return "", "", err
-	}
-
-	// Telegram doesn't accept <br> HTML tags and html-to-markdown adds two newlines instead of one.
-	breakRegex := regexp.MustCompile(`(?i)<br>|<br />`)
-	body = breakRegex.ReplaceAllString(body, "\n")
-
-	trimmedBody := strings.TrimSpace(body)
-	markdownBody, err := convertToMarkdown(trimmedBody)
-
-	return trimmedBody, markdownBody, err
-}
-
 // GenerateCLIFlags returns an array containing all the appropriate flags for the application.
 func GenerateCLIFlags() []cli.Flag {
 	return []cli.Flag{
@@ -190,62 +155,6 @@ func RetrieveFlags(c *cli.Context) map[string]string {
 	return flags
 }
 
-// readMessageBody reads the message body from the SMTP server and returns the string of the body.
-// It also returns an error if it couldn't properly read the message.
-func readMessageBody(data []byte) (string, error) {
-	msg, err := mail.ReadMessage(bytes.NewReader(data))
-
-	if err != nil {
-		return "", err
-	}
-
-	body, err := io.ReadAll(msg.Body)
-
-	if err != nil {
-		return "", err
-	}
-
-	return string(body), nil
-}
-
-// convertToMarkdown converts a string of text to its appropriate Markdown configuration.
-func convertToMarkdown(body string) (string, error) {
-	converter := md.NewConverter("", true, nil)
-	markdownBody, err := converter.ConvertString(body)
-
-	if err != nil {
-		return "", err
-	}
-
-	return markdownBody, nil
-}
-
-// Handle processes SMTP messages to registered services.
-func (h *SmtpHandler) Handle(remoteAddr net.Addr, from string, to []string, data []byte) error {
-	htmlMsg, markdownMsg, err := ProcessMessage(data)
-
-	if err != nil {
-		return err
-	}
-
-	for _, service := range h.services {
-		var msg string
-
-		if service.IsMarkdownService() {
-			msg = markdownMsg
-		} else {
-			msg = htmlMsg
-		}
-
-		if err = service.Send(msg); err != nil {
-			fmt.Printf("Could not send message: %s\n", err.Error())
-			return err
-		}
-	}
-
-	return nil
-}
-
 // initServices is responsible for initializing all messaging services. It returns the number of
 // successfully initialized services as well as a slice of initialized services
 func initServices(flags map[string]string) (int, []Service) {
@@ -265,19 +174,17 @@ func initServices(flags map[string]string) (int, []Service) {
 
 // handleCli is the action function when Tegami is started.
 func handleCli(c *cli.Context) error {
-	smtpAddr := fmt.Sprintf("%s:%s", c.String(smtpHostFlag), c.String(smtpPortFlag))
+	smtpHost := c.String(smtpHostFlag)
+	smtpPort := c.String(smtpPortFlag)
+	smtpAddr := fmt.Sprintf("%s:%s", smtpHost, smtpPort)
 	initServicesCount, services := initServices(RetrieveFlags(c))
 
 	if initServicesCount == 0 {
 		log.Fatalln("Couldn't initialize any messaging service, exiting.")
 	}
 
-	handler := &SmtpHandler{services}
-	srv := &smtpd.Server{
-		Addr:    smtpAddr,
-		Handler: handler.Handle,
-		Appname: "Tegami",
-	}
+	config := &SmtpConfig{smtpHost, smtpPort}
+	srv := CreateSmtpServer(config, services)
 
 	fmt.Printf("Starting SMTP Server at address %s\n", smtpAddr)
 

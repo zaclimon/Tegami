@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/emersion/go-message"
@@ -9,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 )
+
+var IsNotMultipartError = errors.New("message is not multipart")
 
 type Backend struct {
 	services []Service
@@ -82,6 +85,10 @@ func CreateSmtpServer(config *SmtpConfig, services []Service) *smtp.Server {
 func ProcessMessage(messageData io.Reader) (string, string, error) {
 	body, err := readMessageBody(messageData)
 
+	if err != nil {
+		return "", "", err
+	}
+
 	// Telegram doesn't accept <br> HTML tags and html-to-markdown adds two newlines instead of one.
 	breakRegex := regexp.MustCompile(`(?i)<br>|<br />`)
 	body = breakRegex.ReplaceAllString(body, "\n")
@@ -99,6 +106,13 @@ func readMessageBody(data io.Reader) (string, error) {
 
 	if err != nil {
 		return "", err
+	}
+	multipartBody, err := readMultipartBody(msg)
+
+	if err != nil && err != IsNotMultipartError {
+		return "", err
+	} else if err == nil {
+		return multipartBody, nil
 	}
 
 	body, err := io.ReadAll(msg.Body)
@@ -120,4 +134,43 @@ func convertToMarkdown(body string) (string, error) {
 	}
 
 	return markdownBody, nil
+}
+
+func readMultipartBody(msg *message.Entity) (string, error) {
+	var messageBody strings.Builder
+	mr := msg.MultipartReader()
+
+	if mr == nil {
+		return "", IsNotMultipartError
+	}
+
+	for {
+		p, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return "", err
+		}
+
+		contentType, _, _ := p.Header.ContentType()
+
+		if contentType == "text/plain" || contentType == "text/html" {
+			bytes, err := io.ReadAll(p.Body)
+			if err != nil {
+				return "", err
+			}
+
+			// Prioritize html messages over plain text ones
+			if contentType == "text/html" {
+				if messageBody.Len() > 0 {
+					messageBody.Reset()
+				}
+				messageBody.Write(bytes)
+				break
+			} else {
+				messageBody.Write(bytes)
+			}
+		}
+	}
+	return messageBody.String(), nil
 }

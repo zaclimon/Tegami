@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/emersion/go-message/mail"
 	gosmtp "github.com/emersion/go-smtp"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/tucnak/telebot.v2"
@@ -30,6 +31,11 @@ const lineBreak = "\n"
 type RecorderService struct {
 	messageBody       string
 	isMarkdownService bool
+}
+
+type mailContent struct {
+	contentType string
+	content     string
 }
 
 func (s *RecorderService) Init(_ map[string]string) error {
@@ -167,7 +173,7 @@ func TestTelegramService(t *testing.T) {
 	})
 }
 
-func TestSmtpHandler(t *testing.T) {
+func TestSmtpSession(t *testing.T) {
 	toSubjectFields := "To: test2@test.com" + smtpLineBreak + "Subject: Hello!" + smtpLineBreak + smtpLineBreak
 	htmlService := &RecorderService{isMarkdownService: false}
 	markdownService := &RecorderService{isMarkdownService: true}
@@ -201,6 +207,46 @@ func TestSmtpHandler(t *testing.T) {
 		want := "This is a **Bold** message!"
 
 		assertMessageContent(t, t.Name(), got, want)
+	})
+
+	t.Run("Plain text and html multipart message", func(t *testing.T) {
+		msgContentPlain := "This is a Bold message!"
+
+		var tests = []struct {
+			name          string
+			firstContent  *mailContent
+			secondContent *mailContent
+		}{
+			{
+				"Plain text first",
+				&mailContent{"text/plain", msgContentPlain},
+				&mailContent{"text/html", msgContent},
+			},
+			{
+				"HTML text first",
+				&mailContent{"text/html", msgContent},
+				&mailContent{"text/plain", msgContentPlain},
+			},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				writer, buf := createMailWriter(t)
+				addMailPart(t, writer, test.firstContent.contentType, test.firstContent.content)
+				addMailPart(t, writer, test.secondContent.contentType, test.secondContent.content)
+				writer.Close()
+				err := session.Data(bytes.NewReader(buf.Bytes()))
+
+				if err != nil {
+					t.Errorf("Error while processing: %v", err)
+				}
+
+				got := htmlService.messageBody
+				want := msgContent
+
+				assertMessageContent(t, t.Name(), got, want)
+			})
+		}
 	})
 }
 
@@ -382,4 +428,30 @@ func startSmtpServer(config *SmtpConfig, services []Service) *gosmtp.Server {
 	}()
 
 	return srv
+}
+
+func createMailWriter(t *testing.T) (*mail.InlineWriter, *bytes.Buffer) {
+	t.Helper()
+	var b bytes.Buffer
+	var h mail.Header
+	w, err := mail.CreateInlineWriter(&b, h)
+
+	if err != nil {
+		t.Errorf("Could not create mail writer: %v", err)
+	}
+	return w, &b
+}
+
+func addMailPart(t *testing.T, writer *mail.InlineWriter, contentType string, content string) {
+	t.Helper()
+	var header mail.InlineHeader
+	header.Set("Content-Type", contentType)
+	partWriter, err := writer.CreatePart(header)
+
+	if err != nil {
+		t.Errorf("Could not create mail part: %v", err)
+	}
+
+	io.WriteString(partWriter, content)
+	partWriter.Close()
 }

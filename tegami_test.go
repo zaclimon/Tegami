@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/emersion/go-message/mail"
@@ -13,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/smtp"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -38,6 +40,12 @@ type mailContent struct {
 	content     string
 }
 
+type telegramResponse struct {
+	Ok          bool
+	ErrorCode   int `json:"error_code"`
+	Description string
+}
+
 func (s *RecorderService) Init(_ map[string]string) error {
 	return nil
 }
@@ -51,161 +59,26 @@ func (s *RecorderService) IsMarkdownService() bool {
 	return s.isMarkdownService
 }
 
-func TestSendTelegram(t *testing.T) {
-	msg := "This _is_ a *strong* email" + lineBreak + lineBreak + "From test"
-	sendMessageEndpoint := fmt.Sprintf("/bot%s/sendMessage", telegramBotToken)
-
-	t.Run("Correct message", func(t *testing.T) {
-		mux := http.NewServeMux()
-		mux.Handle(sendMessageEndpoint, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			io.WriteString(w, `{"ok": true}`)
-		}))
-
-		service, server := createStubTelegramBotServer(t, mux)
-		defer server.Close()
-
-		err := service.Send(msg)
-
-		if err != nil {
-			t.Errorf("Error while sending message to Telegram: %v", err)
-		}
-	})
-
-	t.Run("Invalid information", func(t *testing.T) {
-		mux := http.NewServeMux()
-		mux.Handle(sendMessageEndpoint, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			io.WriteString(w, `{"ok": false, "error_code": 402, "description": "invalid information"}`)
-		}))
-
-		service, server := createStubTelegramBotServer(t, mux)
-		defer server.Close()
-
-		err := service.Send(msg)
-
-		if err == nil {
-			t.Errorf("No error retrieved when we should have a 402: %v", err)
-		}
-	})
-}
-
-func TestStartApp(t *testing.T) {
-	t.Run("With valid arguments", func(t *testing.T) {
-		args := os.Args[0:1]
-		args = append(args, fmt.Sprintf("-smtp-host=%s", smtpHost))
-		args = append(args, fmt.Sprintf("-smtp-port=%s", smtpPort))
-		args = append(args, fmt.Sprintf("-telegram-token=%s", telegramBotToken))
-		args = append(args, fmt.Sprintf("-telegram-chat-id=%s", "1234"))
-
-		err := runStubApp(args)
-		if err != nil {
-			t.Errorf("Got an error while running the app: %v", err)
-		}
-	})
-
-	t.Run("With no arguments", func(t *testing.T) {
-		args := os.Args[0:1]
-		err := runStubApp(args)
-		if err == nil {
-			t.Errorf("Had no errors while expecting one: %v", err)
-		}
-	})
-}
-
-func TestTelegramService(t *testing.T) {
-	telegramService := &TelegramService{}
-	mux := http.NewServeMux()
-	_, srv := createStubTelegramBotServer(t, mux)
-	flags := generateTestFlags()
-
-	flags[telegramApiUrlFlag] = srv.URL
-
-	t.Run("Init with valid arguments", func(t *testing.T) {
-		err := telegramService.Init(flags)
-
-		if err != nil {
-			t.Errorf("Could not start Telegram service: %v", err)
-		}
-
-		if telegramService.bot == nil {
-			t.Errorf("Telegram bot object not initialized")
-		}
-
-		if telegramService.room == nil {
-			t.Errorf("Telegram room not initialized")
-		}
-	})
-
-	t.Run("Init with invalid arguments", func(t *testing.T) {
-		flags[telegramTokenFlag] = "foo"
-		err := telegramService.Init(flags)
-
-		if err == nil {
-			t.Errorf("Could start Telegram service even though we should not: %v", err)
-		}
-	})
-
-	t.Run("Init with missing token", func(t *testing.T) {
-		flags = generateTestFlags()
-		flags[telegramTokenFlag] = ""
-		err := telegramService.Init(flags)
-		if err == nil {
-			t.Errorf("Could start Telegram service even though we should not: %v", err)
-		}
-
-		got := err.Error()
-		want := "telegram token not set"
-		assertErrorContent(t, got, want)
-	})
-
-	t.Run("Init with missing chat room id", func(t *testing.T) {
-		flags = generateTestFlags()
-		flags[telegramChatIdFlag] = ""
-		err := telegramService.Init(flags)
-		if err == nil {
-			t.Errorf("Could start Telegram service even though we should not: %v", err)
-		}
-
-		got := err.Error()
-		want := "telegram chat id not set"
-		assertErrorContent(t, got, want)
-	})
-}
-
 func TestSmtpSession(t *testing.T) {
-	toSubjectFields := "To: test2@test.com" + smtpLineBreak + "Subject: Hello!" + smtpLineBreak + smtpLineBreak
 	htmlService := &RecorderService{isMarkdownService: false}
 	markdownService := &RecorderService{isMarkdownService: true}
 	session := Session{[]Service{htmlService, markdownService}}
-	msgContent := "This is a <b>Bold</b> message!"
-	msg := []byte(toSubjectFields + msgContent)
+	msgContent := "This is a <b>bold</b> message!"
 
-	err := session.Data(bytes.NewReader(msg))
+	t.Run("Basic HTML and markdown parsing", func(t *testing.T) {
+		msg := createTextMail(t, msgContent)
+		err := session.Data(strings.NewReader(msg))
 
-	if err != nil {
-		t.Errorf("Something went wrong when reading the message %v", err)
-	}
-
-	t.Run("Retrieve HTML body on non-markdown service", func(t *testing.T) {
-		if htmlService.IsMarkdownService() {
-			t.Errorf("Non-Markdown service is specified as markdown")
+		if err != nil {
+			t.Errorf("Something went wrong when reading the message %v", err)
 		}
 
 		got := htmlService.messageBody
-		want := "This is a <b>Bold</b> message!"
-
+		want := msgContent
 		assertMessageContent(t, t.Name(), got, want)
-	})
 
-	t.Run("Retrieve Markdown body on markdown service", func(t *testing.T) {
-		if !markdownService.IsMarkdownService() {
-			t.Errorf("Non-Markdown service is specified as markdown")
-		}
-
-		got := markdownService.messageBody
-		want := "This is a **Bold** message!"
-
+		got = markdownService.messageBody
+		want = "This is a **bold** message!"
 		assertMessageContent(t, t.Name(), got, want)
 	})
 
@@ -231,9 +104,9 @@ func TestSmtpSession(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
-				writer, buf := createMailWriter(t)
-				addMailPart(t, writer, test.firstContent.contentType, test.firstContent.content)
-				addMailPart(t, writer, test.secondContent.contentType, test.secondContent.content)
+				writer, buf := createMultipartMailWriter(t)
+				addTextMailPart(t, writer, test.firstContent.contentType, test.firstContent.content)
+				addTextMailPart(t, writer, test.secondContent.contentType, test.secondContent.content)
 				writer.Close()
 				err := session.Data(bytes.NewReader(buf.Bytes()))
 
@@ -250,15 +123,13 @@ func TestSmtpSession(t *testing.T) {
 	})
 }
 
-func TestReceiveMessage(t *testing.T) {
+func TestServerIntegration(t *testing.T) {
 	// Init server
 	config, htmlRecorder, markdownRecorder := generateTestSmtpConfig()
 	srv := startSmtpServer(config, []Service{htmlRecorder, markdownRecorder})
 
 	defer srv.Close()
 	waitForSmtp()
-
-	toSubjectFields := "To: test2@test.com" + smtpLineBreak + "Subject: Hello!" + smtpLineBreak + smtpLineBreak
 
 	var tests = []struct {
 		name            string
@@ -268,43 +139,43 @@ func TestReceiveMessage(t *testing.T) {
 	}{
 		{
 			"One-line body",
-			toSubjectFields + "This is an email",
+			createTextMail(t, "This is an email"),
 			"This is an email",
 			"This is an email",
 		},
 		{
 			"Two-line body",
-			toSubjectFields + "This is an email" + smtpLineBreak + "This is another line",
+			createTextMail(t, "This is an email"+smtpLineBreak+"This is another line"),
 			"This is an email" + smtpLineBreak + "This is another line",
 			"This is an email" + lineBreak + "This is another line",
 		},
 		{
 			"Two-line body with newline in-between",
-			toSubjectFields + "This is an email" + smtpLineBreak + smtpLineBreak + "This is another line",
+			createTextMail(t, "This is an email"+smtpLineBreak+smtpLineBreak+"This is another line"),
 			"This is an email" + smtpLineBreak + smtpLineBreak + "This is another line",
 			"This is an email" + lineBreak + lineBreak + "This is another line",
 		},
 		{
 			"Two-line body with newline at the end",
-			toSubjectFields + "This is an email" + smtpLineBreak + "This is another line" + smtpLineBreak,
+			createTextMail(t, "This is an email"+smtpLineBreak+"This is another line"+smtpLineBreak),
 			"This is an email" + smtpLineBreak + "This is another line",
 			"This is an email" + lineBreak + "This is another line",
 		},
 		{
 			"One-line body with bold attribute",
-			toSubjectFields + "This is a <b>strong</b> email",
+			createTextMail(t, "This is a <b>strong</b> email"),
 			"This is a <b>strong</b> email",
 			"This is a **strong** email",
 		},
 		{
 			"Three-line body with header, italics and bold",
-			toSubjectFields + "<h1>Hi</h1>" + smtpLineBreak + "This <i>is</i> a <b>strong</b> email" + smtpLineBreak + "From test",
+			createTextMail(t, "<h1>Hi</h1>"+smtpLineBreak+"This <i>is</i> a <b>strong</b> email"+smtpLineBreak+"From test"),
 			"<h1>Hi</h1>" + smtpLineBreak + "This <i>is</i> a <b>strong</b> email" + smtpLineBreak + "From test",
 			"# Hi" + lineBreak + lineBreak + "This _is_ a **strong** email" + lineBreak + "From test",
 		},
 		{
 			"Five-line body using break (br) HTML tags",
-			toSubjectFields + "This is an email<br>This is another line<BR>This is a third line<br />This is a fourth line<BR />This is a fifth line",
+			createTextMail(t, "This is an email<br>This is another line<BR>This is a third line<br />This is a fourth line<BR />This is a fifth line"),
 			"This is an email" + lineBreak + "This is another line" + lineBreak + "This is a third line" + lineBreak + "This is a fourth line" + lineBreak + "This is a fifth line",
 			"This is an email" + lineBreak + "This is another line" + lineBreak + "This is a third line" + lineBreak + "This is a fourth line" + lineBreak + "This is a fifth line",
 		},
@@ -324,6 +195,138 @@ func TestReceiveMessage(t *testing.T) {
 			assertMessageContent(t, test.name, got, want)
 		})
 	}
+}
+
+func TestTelegramService(t *testing.T) {
+	t.Run("Init", func(t *testing.T) {
+		telegramService := &TelegramService{}
+		mux := http.NewServeMux()
+		_, srv := createStubTelegramBotServer(t, mux)
+		flags := generateTestFlags()
+
+		flags[telegramApiUrlFlag] = srv.URL
+
+		t.Run("Init with valid arguments", func(t *testing.T) {
+			err := telegramService.Init(flags)
+
+			if err != nil {
+				t.Errorf("Could not start Telegram service: %v", err)
+			}
+
+			if telegramService.bot == nil {
+				t.Errorf("Telegram bot object not initialized")
+			}
+
+			if telegramService.room == nil {
+				t.Errorf("Telegram room not initialized")
+			}
+		})
+
+		t.Run("Init with invalid arguments", func(t *testing.T) {
+			flags[telegramTokenFlag] = "foo"
+			err := telegramService.Init(flags)
+
+			if err == nil {
+				t.Errorf("Could start Telegram service even though we should not: %v", err)
+			}
+		})
+
+		t.Run("Init with missing token", func(t *testing.T) {
+			flags = generateTestFlags()
+			flags[telegramTokenFlag] = ""
+			err := telegramService.Init(flags)
+			if err == nil {
+				t.Errorf("Could start Telegram service even though we should not: %v", err)
+			}
+
+			got := err.Error()
+			want := "telegram token not set"
+			assertErrorContent(t, got, want)
+		})
+
+		t.Run("Init with missing chat room id", func(t *testing.T) {
+			flags = generateTestFlags()
+			flags[telegramChatIdFlag] = ""
+			err := telegramService.Init(flags)
+			if err == nil {
+				t.Errorf("Could start Telegram service even though we should not: %v", err)
+			}
+
+			got := err.Error()
+			want := "telegram chat id not set"
+			assertErrorContent(t, got, want)
+		})
+	})
+
+	t.Run("Send", func(t *testing.T) {
+		var tests = []struct {
+			name               string
+			responseBody       string
+			expectedStatusCode int
+		}{
+			{
+				"Correct message",
+				`{"ok": true}`,
+				http.StatusOK,
+			},
+			{
+				"Invalid information",
+				`{"ok": false, "error_code": 400, "description": "invalid information"}`,
+				http.StatusBadRequest,
+			},
+		}
+
+		for _, test := range tests {
+			var response telegramResponse
+			msg := "This _is_ a *strong* email" + lineBreak + lineBreak + "From test"
+			sendMessageEndpoint := fmt.Sprintf("/bot%s/sendMessage", telegramBotToken)
+
+			mux := http.NewServeMux()
+			mux.Handle(sendMessageEndpoint, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, test.responseBody)
+			}))
+
+			service, server := createStubTelegramBotServer(t, mux)
+			err := service.Send(msg)
+
+			json.Unmarshal([]byte(test.responseBody), &response)
+
+			if response.Ok && err != nil {
+				t.Errorf("Error while we weren't supposed to get any: %v", err)
+			}
+
+			if !response.Ok && err == nil {
+				t.Errorf("We didn't get any error while we were supposed to get one.\n"+
+					"Expected error code %d; expected description: %s", response.ErrorCode, response.Description)
+			}
+
+			server.Close()
+		}
+	})
+}
+
+func TestAppStart(t *testing.T) {
+	t.Run("With valid arguments", func(t *testing.T) {
+		args := os.Args[0:1]
+		args = append(args, fmt.Sprintf("-smtp-host=%s", smtpHost))
+		args = append(args, fmt.Sprintf("-smtp-port=%s", smtpPort))
+		args = append(args, fmt.Sprintf("-telegram-token=%s", telegramBotToken))
+		args = append(args, fmt.Sprintf("-telegram-chat-id=%s", "1234"))
+
+		err := runStubApp(args)
+		if err != nil {
+			t.Errorf("Got an error while running the app: %v", err)
+		}
+	})
+
+	t.Run("With no arguments", func(t *testing.T) {
+		args := os.Args[0:1]
+		err := runStubApp(args)
+		if err == nil {
+			t.Errorf("Had no errors while expecting one: %v", err)
+		}
+	})
 }
 
 func waitForSmtp() {
@@ -430,19 +433,13 @@ func startSmtpServer(config *SmtpConfig, services []Service) *gosmtp.Server {
 	return srv
 }
 
-func createMailWriter(t *testing.T) (*mail.InlineWriter, *bytes.Buffer) {
+func createMultipartMailWriter(t *testing.T) (*mail.InlineWriter, *bytes.Buffer) {
 	t.Helper()
-	var b bytes.Buffer
-	var h mail.Header
-	w, err := mail.CreateInlineWriter(&b, h)
-
-	if err != nil {
-		t.Errorf("Could not create mail writer: %v", err)
-	}
-	return w, &b
+	writer, _, buf := createMailWriter(t, false)
+	return writer, buf
 }
 
-func addMailPart(t *testing.T, writer *mail.InlineWriter, contentType string, content string) {
+func addTextMailPart(t *testing.T, writer *mail.InlineWriter, contentType string, content string) {
 	t.Helper()
 	var header mail.InlineHeader
 	header.Set("Content-Type", contentType)
@@ -454,4 +451,29 @@ func addMailPart(t *testing.T, writer *mail.InlineWriter, contentType string, co
 
 	io.WriteString(partWriter, content)
 	partWriter.Close()
+}
+
+func createTextMail(t *testing.T, content string) string {
+	t.Helper()
+	_, writer, buf := createMailWriter(t, true)
+
+	io.WriteString(writer, content)
+	writer.Close()
+	return string(buf.Bytes())
+}
+
+func createMailWriter(t *testing.T, isSingleInline bool) (*mail.InlineWriter, io.WriteCloser, *bytes.Buffer) {
+	t.Helper()
+	var inlineWriter *mail.InlineWriter
+	var singleInlineWriter io.WriteCloser
+	var buffer bytes.Buffer
+	var header mail.Header
+
+	if isSingleInline {
+		singleInlineWriter, _ = mail.CreateSingleInlineWriter(&buffer, header)
+	} else {
+		inlineWriter, _ = mail.CreateInlineWriter(&buffer, header)
+	}
+
+	return inlineWriter, singleInlineWriter, &buffer
 }

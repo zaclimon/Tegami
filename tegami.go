@@ -48,6 +48,8 @@ type Service interface {
 	// Send transfers the message to the service and returns
 	// an error if there was an issue during the transmission.
 	Send(msg string) error
+	// IsMarkdownService validates whether the service is better
+	// suited to deal with markdown formatted messages.
 	IsMarkdownService() bool
 }
 
@@ -195,6 +197,7 @@ func handleCli(c *cli.Context) error {
 	return nil
 }
 
+// generateFlagNames retrieves the CLI flags names
 func generateFlagNames() []string {
 	flags := GenerateCLIFlags()
 	flagNames := make([]string, len(flags))

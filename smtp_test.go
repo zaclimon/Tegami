@@ -14,7 +14,7 @@ import (
 func TestSmtpSession(t *testing.T) {
 	htmlService := &RecorderService{isMarkdownService: false}
 	markdownService := &RecorderService{isMarkdownService: true}
-	session := Session{[]Service{htmlService, markdownService}}
+	session := TegamiSession{[]Service{htmlService, markdownService}}
 	msgContent := "This is a <b>bold</b> message!"
 
 	t.Run("Basic HTML and markdown parsing", func(t *testing.T) {

@@ -13,35 +13,39 @@ import (
 
 var IsNotMultipartError = errors.New("message is not multipart")
 
-type Backend struct {
+// TegamiBackend is a concrete implementation of an
+// SMTP backend for Tegami.
+type TegamiBackend struct {
 	services []Service
 }
 
-func (bkd *Backend) Login(_ *smtp.ConnectionState, _, _ string) (smtp.Session, error) {
+func (bkd *TegamiBackend) Login(_ *smtp.ConnectionState, _, _ string) (smtp.Session, error) {
 	return nil, nil
 }
 
-func (bkd *Backend) AnonymousLogin(_ *smtp.ConnectionState) (smtp.Session, error) {
-	return &Session{bkd.services}, nil
+func (bkd *TegamiBackend) AnonymousLogin(_ *smtp.ConnectionState) (smtp.Session, error) {
+	return &TegamiSession{bkd.services}, nil
 }
 
-type Session struct {
+// TegamiSession is a concrete implementation of an SMTP
+// session for Tegami.
+type TegamiSession struct {
 	services []Service
 }
 
-func (s *Session) AuthPlain(_, _ string) error {
+func (s *TegamiSession) AuthPlain(_, _ string) error {
 	return nil
 }
 
-func (s *Session) Mail(_ string, _ smtp.MailOptions) error {
+func (s *TegamiSession) Mail(_ string, _ smtp.MailOptions) error {
 	return nil
 }
 
-func (s *Session) Rcpt(_ string) error {
+func (s *TegamiSession) Rcpt(_ string) error {
 	return nil
 }
 
-func (s *Session) Data(r io.Reader) error {
+func (s *TegamiSession) Data(r io.Reader) error {
 	htmlMessage, markdownMessage, err := ProcessMessage(r)
 
 	if err != nil {
@@ -65,14 +69,16 @@ func (s *Session) Data(r io.Reader) error {
 	return nil
 }
 
-func (s *Session) Reset() {}
+func (s *TegamiSession) Reset() {}
 
-func (s *Session) Logout() error {
+func (s *TegamiSession) Logout() error {
 	return nil
 }
 
+// CreateSmtpServer creates an SMTP server based on its configuration and
+// supported services. The server is not yet started.
 func CreateSmtpServer(config *SmtpConfig, services []Service) *smtp.Server {
-	be := &Backend{services}
+	be := &TegamiBackend{services}
 	srv := smtp.NewServer(be)
 	srv.Addr = fmt.Sprintf("%s:%s", config.host, config.port)
 	srv.AllowInsecureAuth = true
@@ -136,6 +142,9 @@ func convertToMarkdown(body string) (string, error) {
 	return markdownBody, nil
 }
 
+// readMultipartBody reads an email's multipart body and returns its
+// textual content. For better formatting reasons, HTML based messages
+// are prioritized over plain text ones.
 func readMultipartBody(msg *message.Entity) (string, error) {
 	var messageBody strings.Builder
 	mr := msg.MultipartReader()
